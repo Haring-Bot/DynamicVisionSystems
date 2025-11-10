@@ -3,6 +3,7 @@ import numpy as np
 from pprint import pprint
 import cv2
 import pickle
+import torch
 
 # average amount of train events for class 3: 4703.4139618333065
 # average amount of train events for class 1: 2432.0760901809554
@@ -166,12 +167,14 @@ def saveDataset(filename, data):
         pickle.dump(data, file, protocol=pickle.HIGHEST_PROTOCOL)
         print(f"data saved as {filename}")
 
-#def trainModel(data):
+def loadDataset(path):
+    with open(path, "rb") as file:
+        data = pickle.load(file)
+    print(f"loaded dataset from f{path}")
 
+    return data
 
-def main():
-    path = os.path.join(os.getcwd(), "raw_data")
-    print(path)
+def prepareData(path):
     allImagesTrain, allImagesTest = analyzeDataset(path)
     allImagesTotal = {"train" : allImagesTrain, "test" : allImagesTest}
     try: 
@@ -180,7 +183,27 @@ def main():
     except:
         print("size print didnt work")
 
-    saveDataset(os.path.join(os.getcwd(), "results/dataset.pkl"), allImagesTotal)
+    savePath = os.path.join(os.getcwd(), "results/dataset.pkl")
+    saveDataset(savePath, allImagesTotal)
+
+    return savePath
+
+def trainModel(data):
+    print(torch.__version__)
+    print("starting training")
+    
+
+
+def main():
+    path = os.path.join(os.getcwd(), "raw_data")
+    print(path)
+
+    savedPath = "/home/julian/Documents/FH/Krakow/dynamicVisionSensors/Lab4/results/dataset.pkl"
+    #savedPath = prepareData(path)
+
+    data = loadDataset(savedPath)
+    trainModel(data)
+    
 
     # for folderName, content in allImagesTotal.items():
     #     os.makedirs(os.path.join(os.getcwd(), folderName, "images"), exist_ok = True)
