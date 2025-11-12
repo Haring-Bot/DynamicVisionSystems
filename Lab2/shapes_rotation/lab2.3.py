@@ -60,21 +60,18 @@ def exponential_decay(data, image):
     return normalizedImage
 
 def event_frequency(data, image):
-    # Count positive-polarity events per pixel and normalize to 0..255
     counts = np.zeros_like(image, dtype=float)
 
     for event in data:
         ts, x, y, p = event[0], event[1], event[2], event[3]
         if p == 1:
-            # note: image is [row=y-1, col=x-1]
-            counts[y-1, x-1] += 1
+            counts[x-1, y-1] += 1
         elif p == -1:
             continue
         else:
             print("ERROR: unexpected polarity", p)
             break
 
-    # normalize counts to 0..255
     if counts.max() > 0:
         normalized = cv2.normalize(counts, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
         normalized = normalized.astype(np.uint8)
