@@ -3,7 +3,7 @@ import numpy as np
 from pprint import pprint
 import cv2
 import pickle
-import torch
+#import torch
 
 # average amount of train events for class 3: 4703.4139618333065
 # average amount of train events for class 1: 2432.0760901809554
@@ -202,7 +202,8 @@ def main():
     #savedPath = prepareData(path)
 
     data = loadDataset(savedPath)
-    trainModel(data)
+    print(type(data))
+    #trainModel(data)
     
 
     # for folderName, content in allImagesTotal.items():
