@@ -11,7 +11,7 @@ imageCols = 179
 
 data = []
 
-image = np.ones((imageRows, imageCols))
+image = np.ones((imageCols, imageRows))
 image = image * 127
 
 print(image.shape)
@@ -65,7 +65,7 @@ def event_frequency(data, image):
     for event in data:
         ts, x, y, p = event[0], event[1], event[2], event[3]
         if p == 1:
-            counts[x-1, y-1] += 1
+            counts[y-1, x-1] += 1
         elif p == -1:
             continue
         else:
