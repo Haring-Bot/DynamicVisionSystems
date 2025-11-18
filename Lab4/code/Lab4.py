@@ -3,6 +3,7 @@ import numpy as np
 from pprint import pprint
 import cv2
 import pickle
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -258,7 +259,7 @@ class customCNN(nn.Module):
 
         return x
 
-def trainModel(path):
+def trainModel(path, testPath):
     device = "cpu"
 
     print(torch.__version__)
@@ -266,24 +267,43 @@ def trainModel(path):
 
     transform = transforms.Compose([
         transforms.Resize((34, 34)),
+        transforms.RandomHorizontalFlip(p=0.5),     #only for extension
+        transforms.RandomRotation(10),              #only for extension
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
-    dataset = CustomImageDataset(root_dir = path, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    # Create train and validation datasets
+    train_dataset = CustomImageDataset(root_dir=path, transform=transform)
+    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    
+    val_dataset = CustomImageDataset(root_dir=testPath, transform=transform)
+    val_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    
     model = customCNN(numClasses=10).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    nEpochs = 10
+    # History tracking
+    history = {
+        'loss': [],
+        'accuracy': [],
+        'val_loss': [],
+        'val_accuracy': []
+    }
+
+    best_val_accuracy = 0.0
+    nEpochs = 5
     for epoch in range(nEpochs):
-        print(f"starting training epoch {epoch} out of {nEpochs}")
-        runningLoss = 0.0
+        print(f"starting training epoch {epoch+1} out of {nEpochs}")
+        
+        # Training phase
+        model.train()
+        running_loss = 0.0
         total = 0
         correct = 0
 
-        for images, labels in dataloader:
+        for images, labels in train_dataloader:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(images)
@@ -291,40 +311,164 @@ def trainModel(path):
             loss.backward()
             optimizer.step()
 
-            runningLoss += loss.item()
+            running_loss += loss.item()
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-        print(f"Epoch [{epoch+1}/{nEpochs}], Loss: {runningLoss/len(dataloader):.4f}, Accuracy: {100*correct/total:.2f}%")
-    
+        train_loss = running_loss / len(train_dataloader)
+        train_accuracy = 100 * correct / total
+        history['loss'].append(train_loss)
+        history['accuracy'].append(train_accuracy)
 
+        # Validation phase
+        model.eval()
+        val_running_loss = 0.0
+        val_total = 0
+        val_correct = 0
+
+        with torch.no_grad():
+            for images, labels in val_dataloader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                val_running_loss += loss.item()
+                _, predicted = torch.max(outputs, 1)
+                val_total += labels.size(0)
+                val_correct += (predicted == labels).sum().item()
+
+        val_loss = val_running_loss / len(val_dataloader)
+        val_accuracy = 100 * val_correct / val_total
+        history['val_loss'].append(val_loss)
+        history['val_accuracy'].append(val_accuracy)
+
+        print(f"Epoch [{epoch+1}/{nEpochs}], Train Loss: {train_loss:.4f}, Train Acc: {train_accuracy:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_accuracy:.2f}%")
+
+        # Save best model
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            best_model_path = os.path.join(os.getcwd(), "results", "best_model.pth")
+            os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_accuracy': val_accuracy,
+                'val_loss': val_loss,
+            }, best_model_path)
+            print(f"Best model saved with validation accuracy: {val_accuracy:.2f}%")
+
+    # Save final model
+    final_model_path = os.path.join(os.getcwd(), "results", "final_model.pth")
+    os.makedirs(os.path.dirname(final_model_path), exist_ok=True)
+    torch.save({
+        'epoch': nEpochs,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'history': history,
+    }, final_model_path)
+    print(f"Final model saved to {final_model_path}")
+
+    # Plot training history
+    plot_training_history(history)
+    
+    return model, history
+
+
+def plot_training_history(history):
+    """Plot training and validation accuracy and loss"""
+    
+    # Plot accuracy
+    plt.figure(figsize=(12, 4))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(history['accuracy'], label='train')
+    plt.plot(history['val_accuracy'], label='test')
+    plt.title('Model Accuracy')
+    plt.ylabel('Accuracy (%)')
+    plt.xlabel('Epoch')
+    plt.legend(loc='upper left')
+    plt.grid(True)
+    
+    # Plot loss
+    plt.subplot(1, 2, 2)
+    plt.plot(history['loss'], label='train')
+    plt.plot(history['val_loss'], label='test')
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(loc='upper left')
+    plt.grid(True)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    save_path = os.path.join(os.getcwd(), "results", "training_history.png")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Training history plot saved to {save_path}")
+    
+    plt.show()
+
+def predict_single_image(model, image_path, device='cpu'):
+    transform = transforms.Compose([
+        transforms.Resize((34, 34)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
+    
+    original_image = Image.open(image_path).convert("RGB")
+    
+    image = transform(original_image).unsqueeze(0).to(device)
+    
+    model.eval()
+    with torch.no_grad():
+        probabilities = F.softmax(model(image), dim=1).cpu().numpy()[0]
+    
+    plt.imshow(original_image)
+    plt.title(f"Input Image: {os.path.basename(image_path)}")
+    plt.axis('off')
+    plt.show()
+
+    print(f"\nPrediction for: {image_path}")
+    for x in range(10):
+        print(f"The probability that the number is {x} equals {probabilities[x]*100:.2f}%")
+    
+    predicted_class = np.argmax(probabilities)
+    print(f"\nPredicted: {predicted_class} ({probabilities[predicted_class]*100:.2f}%)")
+    
+    return probabilities, predicted_class
 
 def main():
     path = os.path.join(os.getcwd(), "raw_data")
     print(path)
 
     savedPath = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/results/dataset.pkl"
-    imagesPath = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/images/train/images"
-    #savedPath = prepareData(path)
-
-    data = loadDataset(savedPath)
-    print(type(data))
-    trainModel(imagesPath)
+    imagesPathTrain = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/images/train/images"
+    imagesPathTest = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/images/test/images"
     
-
-    # for folderName, content in data.items():
-    #     os.makedirs(os.path.join(os.getcwd(), folderName, "images"), exist_ok = True)
-    #     for label, data in content.items():
-    #         currentFolder = os.path.join(os.getcwd(), folderName, "images", label)
-    #         os.makedirs(currentFolder, exist_ok=True)
-    #         for image in data:
-    #             saveImage(image, folder = currentFolder)
-    #         print(f"finished saving images in {currentFolder}")
-
-
-
+    train_new_model = False
     
+    if train_new_model:
+        data = loadDataset(savedPath)
+        print(type(data))
+        
+        model, history = trainModel(imagesPathTrain, imagesPathTest)
+        print("History keys:", history.keys())
+    else:
+        model = customCNN(numClasses=10)
+    
+    best_model_path = os.path.join(os.getcwd(), "results", "best_model.pth")
+    checkpoint = torch.load(best_model_path, map_location='cpu')
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"\nLoaded best model (Val Acc: {checkpoint['val_accuracy']:.2f}%)")
+    
+    test_image_path = os.path.join(imagesPathTest, "3/event_frame_299489.png")
+    probabilities, predicted_class = predict_single_image(model, test_image_path, device='cpu')
+
+#epoch= amount of times model is run and weights updated
+#batch_size = amount of images being processed at once
 
 if __name__ == "__main__":
     main()
