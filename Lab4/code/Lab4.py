@@ -3,8 +3,14 @@ import numpy as np
 from pprint import pprint
 import cv2
 import pickle
-#import torch
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
+from PIL import Image
 # average amount of train events for class 3: 4703.4139618333065
 # average amount of train events for class 1: 2432.0760901809554
 # average amount of train events for class 6: 4215.370057451842
@@ -170,7 +176,7 @@ def saveDataset(filename, data):
 def loadDataset(path):
     with open(path, "rb") as file:
         data = pickle.load(file)
-    print(f"loaded dataset from f{path}")
+    print(f"loaded dataset from {path}")
 
     return data
 
@@ -188,9 +194,109 @@ def prepareData(path):
 
     return savePath
 
-def trainModel(data):
+class CustomImageDataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.images = []
+        self.labels = []
+        self.class_to_idx = {}
+        
+        classes = sorted(os.listdir(root_dir))
+        for idx, cls in enumerate(classes):
+            self.class_to_idx[cls] = idx
+            cls_folder = os.path.join(root_dir, cls)
+            for img_name in os.listdir(cls_folder):
+                self.images.append(os.path.join(cls_folder, img_name))
+                self.labels.append(idx)
+                
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        img_path = self.images[idx]
+        label = self.labels[idx]
+        image = Image.open(img_path).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        return image, label
+
+class customConv(nn.Module):
+    def __init__(self, inputCh, outputCh, kernelSize):
+        super(customConv, self).__init__()
+        self.conv = nn.Conv2d(inputCh, outputCh, kernelSize, padding = 1)
+        self.bn = nn.BatchNorm2d(outputCh)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = F.relu(x)
+        
+        return x
+    
+
+class customCNN(nn.Module):
+    def __init__(self, numClasses):
+        super(customCNN, self).__init__()
+        self.layer1 = customConv(3, 32, 3)
+        self.layer2 = customConv(32, 32, 3)
+        self.layer3 = customConv(32, 32, 3)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(512, 128)
+        self.fc2 = nn.Linear(128, numClasses)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.pool(x)
+        x = self.layer2(x)
+        x = self.pool(x)
+        x = self.layer3(x)
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+
+        return x
+
+def trainModel(path):
+    device = "cpu"
+
     print(torch.__version__)
     print("starting training")
+
+    transform = transforms.Compose([
+        transforms.Resize((34, 34)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
+
+    dataset = CustomImageDataset(root_dir = path, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    model = customCNN(numClasses=10).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
+
+    nEpochs = 10
+    for epoch in range(nEpochs):
+        print(f"starting training epoch {epoch} out of {nEpochs}")
+        runningLoss = 0.0
+        total = 0
+        correct = 0
+
+        for images, labels in dataloader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            runningLoss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+        print(f"Epoch [{epoch+1}/{nEpochs}], Loss: {runningLoss/len(dataloader):.4f}, Accuracy: {100*correct/total:.2f}%")
     
 
 
@@ -198,15 +304,16 @@ def main():
     path = os.path.join(os.getcwd(), "raw_data")
     print(path)
 
-    savedPath = "/home/julian/Documents/FH/Krakow/dynamicVisionSensors/Lab4/results/dataset.pkl"
+    savedPath = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/results/dataset.pkl"
+    imagesPath = "/home/julian/Documents/FH/Krakow/DynamicVisionSystems/Lab4/images/train/images"
     #savedPath = prepareData(path)
 
     data = loadDataset(savedPath)
     print(type(data))
-    #trainModel(data)
+    trainModel(imagesPath)
     
 
-    # for folderName, content in allImagesTotal.items():
+    # for folderName, content in data.items():
     #     os.makedirs(os.path.join(os.getcwd(), folderName, "images"), exist_ok = True)
     #     for label, data in content.items():
     #         currentFolder = os.path.join(os.getcwd(), folderName, "images", label)
