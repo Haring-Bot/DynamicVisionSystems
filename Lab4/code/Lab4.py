@@ -148,8 +148,6 @@ def createImageFromEvents(timestamps, xaddr, yaddr, pol, h, w):
              
 def event_frame(data):
     imageFunc = np.ones((data[0][4], data[0][5])) * 127
-    #print(f"data: {data}")
-    #print(f"image from t={data[0][0]} up to t={data[-1][0]}")
     for event in data:
         if event[3] == 1:
             imageFunc[event[2]-1, event[1]-1] = 255
