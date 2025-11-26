@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 from pathlib import Path
 import os
@@ -134,6 +135,7 @@ def simpleObjectTracker(events, objects, maxX, maxY):
     segmentedEvents = []
     eventsToAdd = []
     segmentedBlobs = []
+    combinedImages = []
 
     for event in events:
         if event[0] < 1.0:
@@ -172,18 +174,102 @@ def simpleObjectTracker(events, objects, maxX, maxY):
     print(f"starting adding images and blobs: {len(segmentedEvents)} segments")
 
     for eventL, blobs in zip(segmentedEvents, segmentedBlobs):
-        print("new image")
         image = event_frame(eventL, maxX, maxY)
         keypoints = [cv2.KeyPoint(float(obj[0]), float(obj[1]), float(obj[2])) for obj in blobs]
         combinedImage = cv2.drawKeypoints(image.astype(np.uint8), keypoints, np.array([]), (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        combinedImages.append(combinedImage)
 
         plt.imshow(cv2.cvtColor(combinedImage, cv2.COLOR_BGR2RGB))
         plt.title("Detected Blobs")
         plt.axis('off')
-        plt.show()
+        #plt.show()
 
     print("finished")
-    return(segmentedEvents, segmentedBlobs)
+    return(segmentedEvents, segmentedBlobs, combinedImages)
+
+def advancedObjectTracker(events, objects, maxX, maxY):
+    chosenBlob = objects[0]
+    lastCutoff = 1.0
+    interval = 0.01
+
+    relevantX = []
+    relevantY = []
+    newX = []
+    newY = []
+    cutoffEvents = []
+    combinedImages = []
+
+    for event in events:
+        if event[0] < 1.0:
+            continue
+        elif event[0] > 5.0:
+            break
+        else:
+            pass
+        
+        dX = event[1] - chosenBlob[0]
+        dY = event[2] - chosenBlob[1]
+        dTotal = np.sqrt(dX**2 + dY**2)
+        if dTotal < chosenBlob[2]/2 and dTotal > 0:
+            relevantX.append(dX)
+            relevantY.append(dY)
+        else:
+            continue
+
+        if len(relevantX) > 10 and len(relevantY) > 10:
+            del relevantX[0]
+            del relevantY[0]
+        elif  len(relevantX) <= 10 and len(relevantY) <= 10:
+            pass
+        else:
+            print("!! ERROR !! length of x and y list in advancedObjectTracker is not the same")
+        
+        xAv = np.mean(relevantX)
+        yAv = np.mean(relevantY)
+
+        newX.append(chosenBlob[0] + xAv)
+        newY.append(chosenBlob[1] + yAv)
+
+        if event[0] < lastCutoff + interval:
+            cutoffEvents.append(event)
+
+        else:
+            lastCutoff = event[0]
+            image = event_frame(cutoffEvents, maxX, maxY)
+            keypoints = [cv2.KeyPoint(float(xCord), float(yCord), 1) for xCord, yCord in zip(newX, newY)]
+            combinedImage = cv2.drawKeypoints(image.astype(np.uint8), keypoints, np.array([]), (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+            #plt.imshow(cv2.cvtColor(combinedImage, cv2.COLOR_BGR2RGB))
+            plt.title("Detected Blobs")
+            plt.axis('off')
+            #plt.show()
+
+            newX = []
+            newY = []
+            cutoffEvents = []
+            combinedImages.append(combinedImage)
+    return combinedImages
+
+def images_to_animation(image_list, interval=100):
+    fig, ax = plt.subplots()
+    img_plot = ax.imshow(image_list[0])
+    ax.axis("off")
+
+    def update(frame_index):
+        img_plot.set_data(image_list[frame_index])
+        return [img_plot]
+
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=len(image_list),
+        interval=interval,
+        blit=True
+    )
+
+    return anim
+
+
 
 def main():
     root = Path(__file__).parent.parent
@@ -194,8 +280,12 @@ def main():
 
     image = cv2.imread(os.path.join(datasetPath, "images", "frame_00000022.png"))
     blobsImage, blobObjects = blobDetector(image)
-    simpleObjectTracker(events, blobObjects, maxX, maxY)
+    none, none, combinedImages = simpleObjectTracker(events, blobObjects, maxX, maxY)
+    combinedImagesAdvanced = advancedObjectTracker(events, blobObjects, maxX, maxY)
 
+    animation = images_to_animation(combinedImages, 10)
+    animationCombined = images_to_animation(combinedImagesAdvanced, 10)
+    plt.show()
 
 if __name__ == "__main__":
     main()
